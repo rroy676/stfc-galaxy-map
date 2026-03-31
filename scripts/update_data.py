@@ -223,14 +223,15 @@ def build_resource_lookup(resource_summary, materials_data):
         sample_loca = sorted(loca_to_name.keys())[:5]
         print(f"  Sample loca_ids: {sample_loca} -> {[loca_to_name[k] for k in sample_loca]}")
 
-    # Build game resource_id -> loca_id mapping using "resource_id" (not "id")
+    # Build game resource id -> loca_id mapping.
+    # "id" is the large integer that matches mine_resources in system data.
+    # "resource_id" is a STRING like 'Resource_ShipXP' — do NOT use it for matching.
     resource_id_to_loca = {}
     for r in resource_summary:
         loca = r.get("loca_id")
         if loca is None:
             continue
-        # "resource_id" is the large game ID that matches mine_resources in systems
-        game_id = r.get("resource_id")
+        game_id = r.get("id")   # integer, matches mine_resource IDs in systems
         if game_id is not None:
             resource_id_to_loca[game_id] = loca
 
@@ -248,23 +249,10 @@ def build_resource_lookup(resource_summary, materials_data):
         print(f"  Mine names resolved: {hits}")
         return lookup
 
-    # Fallback: try internal "id" field instead of "resource_id"
-    internal_id_to_loca = {r["id"]: r["loca_id"]
-                           for r in resource_summary
-                           if "id" in r and "loca_id" in r and r["loca_id"] is not None}
-    for internal_id, loca in internal_id_to_loca.items():
-        name = loca_to_name.get(int(loca) if not isinstance(loca, int) else loca)
-        if name:
-            lookup[internal_id] = name
-
-    if lookup:
-        print(f"  Mine names resolved (fallback via internal id): {len(lookup)}")
-        return lookup
-
     print("  WARNING: mine names still unresolved. Diagnostic:")
     sample_gids = list(resource_id_to_loca.keys())[:5]
     sample_locas = [resource_id_to_loca[g] for g in sample_gids]
-    print(f"    game resource_ids:  {sample_gids}")
+    print(f"    game resource ids:  {sample_gids}")
     print(f"    their loca_ids:     {sample_locas}")
     print(f"    loca_to_name keys:  {sorted(loca_to_name.keys())[:10]}")
     return lookup
