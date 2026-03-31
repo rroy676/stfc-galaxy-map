@@ -1,0 +1,54 @@
+name: Update Galaxy Map Data
+
+on:
+  schedule:
+    # Runs every Sunday at 00:00 UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    # Allows manual trigger from the GitHub Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run data update script
+        run: python3 scripts/update_data.py
+
+      - name: Check for changes
+        id: check_changes
+        run: |
+          git diff --quiet assets/json/ && echo "changed=false" >> $GITHUB_OUTPUT || echo "changed=true" >> $GITHUB_OUTPUT
+
+      - name: Commit and push if data changed
+        if: steps.check_changes.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add assets/json/systems.geojson \
+                  assets/json/travel-paths.geojson \
+                  assets/json/territories.geojson
+          SYSTEM_COUNT=$(python3 -c "import json; d=json.load(open('assets/json/systems.geojson')); print(len(d['features']))")
+          PATH_COUNT=$(python3 -c "import json; d=json.load(open('assets/json/travel-paths.geojson')); print(len(d['features']))")
+          git commit -m "chore: update galaxy map data [$(date -u '+%Y-%m-%d')]
+
+          Systems: ${SYSTEM_COUNT}
+          Warp lanes: ${PATH_COUNT}
+          Source: data.stfc.space"
+          git push
+
+      - name: No changes detected
+        if: steps.check_changes.outputs.changed == 'false'
+        run: echo "Galaxy map data is already up to date."
