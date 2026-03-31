@@ -179,17 +179,79 @@ def build_faction_lookup(factions_data):
     return lookup
 
 def build_resource_lookup(resource_summary, materials_data):
+    """
+    Build {resource_id (int): display_name} for mine resource IDs.
+
+    Tries three strategies in order:
+    1. loca_id bridge: resource/summary.json {id, loca_id} + materials.json {id=loca_id, text}
+    2. Direct ID match: materials.json entry ID matches resource ID directly
+    3. hud.json fallback (caller passes hud_data as materials_data alternative)
+    """
     lookup = {}
-    if not resource_summary or not materials_data:
+    if not resource_summary:
+        print("  WARNING: resource/summary.json missing -- mine names will be blank")
         return lookup
-    loca_to_rid = {r["loca_id"]: r["id"]
-                   for r in resource_summary if "loca_id" in r and "id" in r}
+
+    # Diagnostic: show what resource/summary.json actually looks like
+    if resource_summary:
+        sample = resource_summary[0] if isinstance(resource_summary, list) else {}
+        print(f"  resource/summary.json sample keys: {list(sample.keys())[:8]}")
+
+    if not materials_data:
+        print("  WARNING: materials.json missing -- mine names will be blank")
+        return lookup
+
+    # Build lookup from materials keyed by both int and str ID
+    mat_by_id = {}
     for item in materials_data:
-        if item.get("key") != "title":
-            continue
-        rid = loca_to_rid.get(int(item["id"]))
-        if rid is not None:
-            lookup[rid] = item["text"]
+        if item.get("key") == "title" and item.get("text"):
+            try:
+                mat_by_id[int(item["id"])] = item["text"]
+            except (ValueError, TypeError):
+                pass
+
+    print(f"  materials.json title entries: {len(mat_by_id)}")
+    if mat_by_id:
+        sample_ids = sorted(mat_by_id.keys())[:5]
+        print(f"  materials.json sample IDs: {sample_ids}")
+
+    # Strategy 1: loca_id bridge
+    # resource/summary.json: [{id: RESOURCE_ID, loca_id: LOCA_ID, ...}]
+    # materials.json:        [{id: LOCA_ID, key: title, text: NAME}]
+    loca_bridge_hits = 0
+    for r in resource_summary:
+        rid = r.get("id")
+        loca_id = r.get("loca_id")
+        if rid is not None and loca_id is not None:
+            name = mat_by_id.get(int(loca_id))
+            if name:
+                lookup[rid] = name
+                loca_bridge_hits += 1
+
+    if loca_bridge_hits:
+        print(f"  Mine lookup strategy 1 (loca_id bridge): {loca_bridge_hits} resolved")
+        return lookup
+
+    # Strategy 2: resource ID == materials ID directly
+    # Some API versions store the resource's own ID as the translation key
+    rid_set = {r["id"] for r in resource_summary if "id" in r}
+    direct_hits = 0
+    for rid in rid_set:
+        name = mat_by_id.get(rid)
+        if name:
+            lookup[rid] = name
+            direct_hits += 1
+
+    if direct_hits:
+        print(f"  Mine lookup strategy 2 (direct ID match): {direct_hits} resolved")
+        return lookup
+
+    # Nothing worked -- log for diagnosis
+    print("  WARNING: no mine names resolved. Diagnostic info:")
+    print(f"    resource IDs to match: {sorted(rid_set)[:5]}")
+    print(f"    materials IDs available: {sorted(mat_by_id.keys())[:10]}")
+    print("    --> You may need translations/en/hud.json for base resource names")
+    print("    --> Check the Actions log and share a few lines of resource/summary.json")
     return lookup
 
 # ---------------------------------------------------------------------------
@@ -325,9 +387,15 @@ def build_travel_paths(summary, special_paths=None):
                 ca, cb = coord_map.get(a), coord_map.get(b)
                 if ca is None or cb is None:
                     continue
+                # Path endpoints must be stored as [y, x] (swapped vs system coords).
+                # initTravelPaths processes them through xy([a,b]) = L.latLng(b,a),
+                # while system nodes use L.circle([a,b]) = lat=a,lng=b directly.
+                # Swap ensures both resolve to the same Leaflet position.
+                ca_path = [ca[1], ca[0]]
+                cb_path = [cb[1], cb[0]]
                 features.append({
                     "type": "Feature",
-                    "geometry": {"type": "LineString", "coordinates": [ca, cb]},
+                    "geometry": {"type": "LineString", "coordinates": [ca_path, cb_path]},
                     "properties": {"className": ""}
                 })
 
@@ -443,6 +511,7 @@ def main():
     system_names_raw  = fetch_json("/translations/en/systems.json",  version)
     faction_names_raw = fetch_json("/translations/en/factions.json", version)
     materials_raw     = fetch_json("/translations/en/materials.json", version)
+    hud_raw           = fetch_json("/translations/en/hud.json",       version)
     navigation_raw    = fetch_json("/translations/en/navigation.json", version)
 
     if not system_summary:
@@ -453,7 +522,10 @@ def main():
     print("\n[4/7] Building lookup tables...")
     system_names    = build_name_lookup(system_names_raw or [])
     faction_lookup  = build_faction_lookup(faction_names_raw or [])
-    resource_lookup = build_resource_lookup(resource_summary, materials_raw)
+    # Combine materials + hud translations: base resource names (loca_id 63, 64…)
+    # live in hud.json while level-specific names are in materials.json
+    combined_names  = (materials_raw or []) + (hud_raw or [])
+    resource_lookup = build_resource_lookup(resource_summary, combined_names)
     print(f"  System names:    {len(system_names)}")
     print(f"  Factions:        {len(faction_lookup)}")
     print(f"  Mine resources:  {len(resource_lookup)}")
