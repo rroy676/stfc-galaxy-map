@@ -180,78 +180,93 @@ def build_faction_lookup(factions_data):
 
 def build_resource_lookup(resource_summary, materials_data):
     """
-    Build {resource_id (int): display_name} for mine resource IDs.
+    Build {mine_resource_id (int): display_name}.
 
-    Tries three strategies in order:
-    1. loca_id bridge: resource/summary.json {id, loca_id} + materials.json {id=loca_id, text}
-    2. Direct ID match: materials.json entry ID matches resource ID directly
-    3. hud.json fallback (caller passes hud_data as materials_data alternative)
+    resource/summary.json fields:
+      - "id"          internal table ID (small number — NOT what mine_resources uses)
+      - "resource_id" game resource ID  (large number — matches mine_resources in systems)
+      - "loca_id"     translation key   → look up display name in materials/hud translation
+
+    Translation files (materials.json, hud.json) entries: {id, key, text}
+      The "key" field varies per file and is NOT always "title", so we accept all entries.
     """
     lookup = {}
     if not resource_summary:
         print("  WARNING: resource/summary.json missing -- mine names will be blank")
         return lookup
 
-    # Diagnostic: show what resource/summary.json actually looks like
-    if resource_summary:
-        sample = resource_summary[0] if isinstance(resource_summary, list) else {}
-        print(f"  resource/summary.json sample keys: {list(sample.keys())[:8]}")
+    sample = resource_summary[0] if isinstance(resource_summary, list) else {}
+    print(f"  resource/summary.json sample keys: {list(sample.keys())[:8]}")
+    print(f"  resource/summary.json sample values: {list(sample.values())[:8]}")
 
     if not materials_data:
-        print("  WARNING: materials.json missing -- mine names will be blank")
+        print("  WARNING: translation data missing -- mine names will be blank")
         return lookup
 
-    # Build lookup from materials keyed by both int and str ID
-    mat_by_id = {}
+    # Build translation lookup: loca_id -> display name
+    # Accept ALL entries regardless of "key" value -- key varies per translation file
+    loca_to_name = {}
     for item in materials_data:
-        if item.get("key") == "title" and item.get("text"):
+        text = item.get("text", "").strip()
+        iid  = item.get("id")
+        if text and iid is not None:
             try:
-                mat_by_id[int(item["id"])] = item["text"]
+                loca_id = int(iid)
+                # Prefer shorter/simpler names if multiple keys share the same loca_id
+                if loca_id not in loca_to_name:
+                    loca_to_name[loca_id] = text
             except (ValueError, TypeError):
                 pass
 
-    print(f"  materials.json title entries: {len(mat_by_id)}")
-    if mat_by_id:
-        sample_ids = sorted(mat_by_id.keys())[:5]
-        print(f"  materials.json sample IDs: {sample_ids}")
+    print(f"  Translation entries loaded (all keys): {len(loca_to_name)}")
+    if loca_to_name:
+        sample_loca = sorted(loca_to_name.keys())[:5]
+        print(f"  Sample loca_ids: {sample_loca} -> {[loca_to_name[k] for k in sample_loca]}")
 
-    # Strategy 1: loca_id bridge
-    # resource/summary.json: [{id: RESOURCE_ID, loca_id: LOCA_ID, ...}]
-    # materials.json:        [{id: LOCA_ID, key: title, text: NAME}]
-    loca_bridge_hits = 0
+    # Build game resource_id -> loca_id mapping using "resource_id" (not "id")
+    resource_id_to_loca = {}
     for r in resource_summary:
-        rid = r.get("id")
-        loca_id = r.get("loca_id")
-        if rid is not None and loca_id is not None:
-            name = mat_by_id.get(int(loca_id))
-            if name:
-                lookup[rid] = name
-                loca_bridge_hits += 1
+        loca = r.get("loca_id")
+        if loca is None:
+            continue
+        # "resource_id" is the large game ID that matches mine_resources in systems
+        game_id = r.get("resource_id")
+        if game_id is not None:
+            resource_id_to_loca[game_id] = loca
 
-    if loca_bridge_hits:
-        print(f"  Mine lookup strategy 1 (loca_id bridge): {loca_bridge_hits} resolved")
-        return lookup
+    print(f"  resource_id->loca mappings: {len(resource_id_to_loca)}")
 
-    # Strategy 2: resource ID == materials ID directly
-    # Some API versions store the resource's own ID as the translation key
-    rid_set = {r["id"] for r in resource_summary if "id" in r}
-    direct_hits = 0
-    for rid in rid_set:
-        name = mat_by_id.get(rid)
+    # Resolve: mine resource_id -> loca_id -> display name
+    hits = 0
+    for game_id, loca in resource_id_to_loca.items():
+        name = loca_to_name.get(int(loca) if not isinstance(loca, int) else loca)
         if name:
-            lookup[rid] = name
-            direct_hits += 1
+            lookup[game_id] = name
+            hits += 1
 
-    if direct_hits:
-        print(f"  Mine lookup strategy 2 (direct ID match): {direct_hits} resolved")
+    if hits:
+        print(f"  Mine names resolved: {hits}")
         return lookup
 
-    # Nothing worked -- log for diagnosis
-    print("  WARNING: no mine names resolved. Diagnostic info:")
-    print(f"    resource IDs to match: {sorted(rid_set)[:5]}")
-    print(f"    materials IDs available: {sorted(mat_by_id.keys())[:10]}")
-    print("    --> You may need translations/en/hud.json for base resource names")
-    print("    --> Check the Actions log and share a few lines of resource/summary.json")
+    # Fallback: try internal "id" field instead of "resource_id"
+    internal_id_to_loca = {r["id"]: r["loca_id"]
+                           for r in resource_summary
+                           if "id" in r and "loca_id" in r and r["loca_id"] is not None}
+    for internal_id, loca in internal_id_to_loca.items():
+        name = loca_to_name.get(int(loca) if not isinstance(loca, int) else loca)
+        if name:
+            lookup[internal_id] = name
+
+    if lookup:
+        print(f"  Mine names resolved (fallback via internal id): {len(lookup)}")
+        return lookup
+
+    print("  WARNING: mine names still unresolved. Diagnostic:")
+    sample_gids = list(resource_id_to_loca.keys())[:5]
+    sample_locas = [resource_id_to_loca[g] for g in sample_gids]
+    print(f"    game resource_ids:  {sample_gids}")
+    print(f"    their loca_ids:     {sample_locas}")
+    print(f"    loca_to_name keys:  {sorted(loca_to_name.keys())[:10]}")
     return lookup
 
 # ---------------------------------------------------------------------------
