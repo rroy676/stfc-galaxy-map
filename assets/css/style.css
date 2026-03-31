@@ -374,7 +374,7 @@ body > #map-wrapper {
 .system-detail-panel {
     margin-top: 15px;
     padding:5px;
-    height: 132px;
+    height: 165px;
     background: rgb(0,0,0);
     background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.5) 75%, rgba(255,255,255,0) 100%);
     line-height: 1.5;
@@ -388,6 +388,29 @@ body > #map-wrapper {
 .system-detail-panel div.half-size {
     width:48%;
     float:left;
+}
+.system-detail-panel div.full-size {
+    width:96%;
+    float:left;
+    clear:left;
+}
+.stfc-link, .stfc-space-link a {
+    color: #7fb3d3;
+    text-decoration: none;
+    font-size: 0.8rem;
+}
+.stfc-link:hover, .stfc-space-link a:hover {
+    color: #aed6f1;
+    text-decoration: underline;
+}
+.stfc-space-link {
+    text-align: center;
+    padding: 4px 0 2px 0;
+    font-size: 0.78rem;
+    opacity: 0.85;
+}
+.mission-marker {
+    opacity: 0.85;
 }
 .system-detail-panel img.icon {
     width: 24px;

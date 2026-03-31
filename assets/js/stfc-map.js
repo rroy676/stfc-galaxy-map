@@ -190,6 +190,7 @@ STFCMap = (function() {
     let systemsGroup = []; //temp array to hold the system nodes for layerControl (layers.systems)
     let pathsGroup = []; //temp array (layers.paths)
     let basesGroup = []; //temp array (layers.bases)
+    let missionsGroup = []; //temp array (layers.missions)
     let minesGroup = {}; //temp array (layers.mines)
     let hostilesGroup = {}; //temp array (layers.hostiles)
     let eventsGroup = {}; //temp array (layers.events)
@@ -415,6 +416,7 @@ STFCMap = (function() {
 
         systemsGroup = [];
         basesGroup = [];
+        missionsGroup = [];
         minesGroup = {};
         hostilesGroup = {};
         eventsGroup = {};
@@ -446,6 +448,7 @@ STFCMap = (function() {
             };
             setEvents(yx, event, eventsGroup, eventData); //set the events object
             setBases(yx, basesGroup, properties);
+            setMissions(yx, missionsGroup, properties);
             //cache data for later
             systemIds[id] = name;
             systemNodes[cleaned] = sysNode;
@@ -487,6 +490,20 @@ STFCMap = (function() {
         let options = {icon: iconObj, interactive: false};
         //if(!group.hasOwnProperty(resource)) group[resource] = []; //init the resource group if its not an array
         let marker = makeMarker(yx, options);
+        group.push(marker);
+    };
+    let setMissions = function(yx, group, system) {
+        if(!system.hasMissions) return false;
+        let marker = makeCircleMarker(yx, {
+            radius: 5,
+            color: '#e67e22',
+            fillColor: '#e67e22',
+            fillOpacity: 0.75,
+            weight: 1.5,
+            className: 'mission-marker',
+            pane: 'markerPane',
+            interactive: false
+        });
         group.push(marker);
     };
     let setHostiles = function(yx, hostiles, group, system) {
@@ -606,6 +623,7 @@ STFCMap = (function() {
         layers.Paths = L.layerGroup(pathsGroup).addTo(map);
         layers.System = L.layerGroup(systemsGroup).addTo(map);
         layers.Bases = L.layerGroup(basesGroup);
+        layers.Missions = L.layerGroup(missionsGroup);
         map.removeLayer(layers.Paths); //clear any old paths (only on a refresh)
         map.addLayer(layers.Paths);
 
@@ -626,7 +644,7 @@ STFCMap = (function() {
         if(layerControl) layerControl.remove();
 
         controlLayers = {
-            "": {"Station Hubs": layers.Bases},
+            "": {"Station Hubs": layers.Bases, "Missions Available": layers.Missions},
             "Hostiles": setGroups(layers.hostiles),
             "Mines": setGroups(layers.mines),
             "Events": setGroups(layers.events),
@@ -914,6 +932,11 @@ STFCMap = (function() {
             default:
                 popupClass = territory.substr(0,3).toLowerCase();
         }
+        //missions
+        let hasMissions = d.hasMissions || 0;
+        let missionsHTML = hasMissions
+            ? `<a href="https://stfc.space/systems/${id}" target="_blank" rel="noopener" class="stfc-link">Yes — view on STFC.space ↗</a>`
+            : 'No';
         //construct the popup
         let divOpen = `<div class='popup popup-${popupClass}' data-systemid='${id}'>`;
         let divClose = "</div>";
@@ -935,6 +958,12 @@ STFCMap = (function() {
                     <div class="half-size"><span>Mines:</span> ${minesHTML}</div>
                     <div class="half-size"><span>Armadas:</span> ${armHTML}</div>
                  </div>
+                 <div>
+                    <div class="full-size"><span>Missions:</span> ${missionsHTML}</div>
+                 </div>
+             </div>
+             <div class="stfc-space-link">
+                 <a href="https://stfc.space/systems/${id}" target="_blank" rel="noopener">View full details on STFC.space ↗</a>
              </div>`;
         return divOpen + info + divClose;
     }
