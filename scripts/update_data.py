@@ -203,20 +203,28 @@ def build_resource_lookup(resource_summary, materials_data):
         print("  WARNING: translation data missing -- mine names will be blank")
         return lookup
 
-    # Build translation lookup: loca_id -> display name
-    # Accept ALL entries regardless of "key" value -- key varies per translation file
-    loca_to_name = {}
+    # Build translation lookup: loca_id -> display name.
+    # Translation files have multiple entries per loca_id with different "key" values,
+    # e.g. "short_name" = "Parsteel", "description" = "Used to upgrade 1★ Battleships."
+    # We must prefer short_name > title > any other key to get display-safe names.
+    KEY_PRIORITY = {"short_name": 0, "title": 1}
+    loca_to_name  = {}   # loca_id -> best name found so far
+    loca_priority = {}   # loca_id -> priority of that name (lower = better)
+
     for item in materials_data:
         text = item.get("text", "").strip()
         iid  = item.get("id")
-        if text and iid is not None:
-            try:
-                loca_id = int(iid)
-                # Prefer shorter/simpler names if multiple keys share the same loca_id
-                if loca_id not in loca_to_name:
-                    loca_to_name[loca_id] = text
-            except (ValueError, TypeError):
-                pass
+        key  = item.get("key", "")
+        if not text or iid is None:
+            continue
+        try:
+            loca_id = int(iid)
+        except (ValueError, TypeError):
+            continue
+        priority = KEY_PRIORITY.get(key, 2)
+        if loca_id not in loca_priority or priority < loca_priority[loca_id]:
+            loca_to_name[loca_id]  = text
+            loca_priority[loca_id] = priority
 
     print(f"  Translation entries loaded (all keys): {len(loca_to_name)}")
     if loca_to_name:

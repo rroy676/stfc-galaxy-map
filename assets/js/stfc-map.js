@@ -871,8 +871,9 @@ STFCMap = (function() {
             for (let index in hostilesArr) {
                 if(hostilesArr.hasOwnProperty(index)) {
                     let nodeType = hostilesArr[index].trim();
-                    //console.log("nodeType", nodeType, icons.ship_types[nodeType]);
-                    let iconUrl = icons.ship_types[nodeType].options.iconUrl;
+                    let iconObj = icons.ship_types[nodeType];
+                    if(!iconObj) continue; // unknown type — skip silently
+                    let iconUrl = iconObj.options.iconUrl;
                     let img = `<div class="tooltip"><img class="icon" src="${iconUrl}" /><span class="tooltiptext">${nodeType}</span></div>`;
                     if(nodeType === 'Scout'){
                         scoutsHTML = img+'Yes';
@@ -890,7 +891,13 @@ STFCMap = (function() {
             for (let index in minesArr) {
                 if(minesArr.hasOwnProperty(index)) {
                     let nodeType = minesArr[index].trim();
-                    let iconUrl = icons.mines[nodeType].options.iconUrl;
+                    let iconObj = icons.mines[nodeType];
+                    if(!iconObj) {
+                        // Mine type not in icons.json (new resource added to game)
+                        minesHTML += `<div class="tooltip"><span class="icon-fallback">⛏</span><span class="tooltiptext">${nodeType}</span></div>`;
+                        continue;
+                    }
+                    let iconUrl = iconObj.options.iconUrl;
                     let img = `
                     <div class="tooltip">
                         <img class="icon rss" src="${iconUrl}" />
