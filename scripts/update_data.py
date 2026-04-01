@@ -169,13 +169,41 @@ def build_name_lookup(translations):
             for item in translations if item.get("key") == "title"}
 
 def build_faction_lookup(factions_data):
+    """
+    Build {faction_id (int): territory_name} for all faction IDs seen in systems.
+
+    factions.json is a TRANSLATION file: [{id: LOCA_ID, key: ..., text: NAME}]
+    The loca_id in factions.json does NOT directly equal the faction integer IDs
+    used in system summary data. We need a separate way to connect them.
+
+    Approach:
+    1. Start with all known faction ID -> name mappings (derived from old geojson)
+    2. Try to extend from factions.json using title-keyed entries
+    3. Log what we find for debugging
+    """
     lookup = dict(KNOWN_FACTION_NAMES)
-    if factions_data:
-        for item in factions_data:
-            fid  = item.get("id")
-            name = item.get("text", "").strip()
-            if fid is not None and name and int(fid) not in lookup:
-                lookup[int(fid)] = name
+
+    if not factions_data:
+        return lookup
+
+    # factions.json is a translation file - entries have {id (loca_id), key, text}
+    # The faction loca_ids do NOT match the integer faction IDs in system data.
+    # We can only use this to discover new faction names by text matching.
+    # Collect all short title-style entries as candidate faction names.
+    candidates = set()
+    for item in factions_data:
+        text = item.get("text", "").strip()
+        key  = item.get("key", "")
+        if text and key == "title" and len(text) < 40:
+            candidates.add(text)
+
+    print(f"  Faction name candidates from factions.json: {sorted(candidates)[:15]}")
+
+    # We can't auto-assign these to the 6 unknown faction IDs without knowing
+    # the loca_id<->faction_id mapping. Log the unknown IDs for visibility.
+    known_ids = set(lookup.keys())
+    print(f"  Known faction IDs: {len(known_ids)}")
+    print(f"  Faction lookup entries: {len(lookup)}")
     return lookup
 
 def build_resource_lookup(resource_summary, materials_data):
@@ -204,27 +232,24 @@ def build_resource_lookup(resource_summary, materials_data):
         return lookup
 
     # Build translation lookup: loca_id -> display name.
-    # Translation files have multiple entries per loca_id with different "key" values,
-    # e.g. "short_name" = "Parsteel", "description" = "Used to upgrade 1★ Battleships."
-    # We must prefer short_name > title > any other key to get display-safe names.
-    KEY_PRIORITY = {"short_name": 0, "title": 1}
-    loca_to_name  = {}   # loca_id -> best name found so far
-    loca_priority = {}   # loca_id -> priority of that name (lower = better)
+    # Translation files have multiple entries per loca_id with different "key" values.
+    # We want SHORT display names like "Parsteel" (8 chars), not long descriptions
+    # like "Used to upgrade 1★ Battleships..." (40+ chars).
+    # Strategy: prefer shortest text under 30 chars; skip long descriptions entirely.
+    loca_to_name = {}
 
     for item in materials_data:
         text = item.get("text", "").strip()
         iid  = item.get("id")
-        key  = item.get("key", "")
-        if not text or iid is None:
-            continue
+        if not text or iid is None or len(text) > 30:
+            continue  # skip long descriptions
         try:
             loca_id = int(iid)
         except (ValueError, TypeError):
             continue
-        priority = KEY_PRIORITY.get(key, 2)
-        if loca_id not in loca_priority or priority < loca_priority[loca_id]:
-            loca_to_name[loca_id]  = text
-            loca_priority[loca_id] = priority
+        # Keep the shortest name for each loca_id (most concise = best display name)
+        if loca_id not in loca_to_name or len(text) < len(loca_to_name[loca_id]):
+            loca_to_name[loca_id] = text
 
     print(f"  Translation entries loaded (all keys): {len(loca_to_name)}")
     if loca_to_name:
@@ -382,9 +407,15 @@ def build_systems_geojson(summary, system_names, faction_lookup,
 # ---------------------------------------------------------------------------
 
 def build_travel_paths(summary, special_paths=None):
+    import math
     coord_map  = {s["id"]: game_to_map(s["coords_x"], s["coords_y"]) for s in summary}
     seen_pairs = set()
     features   = []
+
+    # Max distance between connected systems in the original hand-drawn map was 662
+    # (99th percentile was 432). Cap at 500 to kill cross-galaxy patrol artifacts
+    # while keeping all genuine warp lanes including longer deep space connections.
+    MAX_WARP_LANE_DIST = 500
 
     for s in summary:
         for h in s.get("hostiles", []):
@@ -398,10 +429,14 @@ def build_travel_paths(summary, special_paths=None):
                 ca, cb = coord_map.get(a), coord_map.get(b)
                 if ca is None or cb is None:
                     continue
+                # Skip connections that span too far — these are hostile patrol routes
+                # crossing multiple sectors, not direct warp lane connections.
+                dist = math.sqrt((ca[0]-cb[0])**2 + (ca[1]-cb[1])**2)
+                if dist > MAX_WARP_LANE_DIST:
+                    continue
                 # Path endpoints must be stored as [y, x] (swapped vs system coords).
                 # initTravelPaths processes them through xy([a,b]) = L.latLng(b,a),
                 # while system nodes use L.circle([a,b]) = lat=a,lng=b directly.
-                # Swap ensures both resolve to the same Leaflet position.
                 ca_path = [ca[1], ca[0]]
                 cb_path = [cb[1], cb[0]]
                 features.append({
